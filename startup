@@ -1,0 +1,39 @@
+#!/usr/bin/perl
+# Why perl?  I tried this with bash trap,
+# and it wouldn't interrupt the docker run
+# command below.  Perl seems to trap signals
+# more reliably
+
+use Socket;
+
+# A name for the instance we're proxying
+my $name = "$ENV{HOSTNAME}-instance";
+my $PORT = $ENV{PORT};
+my $DOCKER_RUN = $ENV{DOCKER_RUN};
+
+# Trap TERM/INT from the proxy container 
+# in order to stop our instance container
+$SIG{INT} = \&stopper;
+$SIG{TERM} = \&stopper;
+
+my $cid = `docker run -d --name $name $DOCKER_RUN`;
+chomp $cid;
+print "Started container $cid\n";
+
+# socat seems to segfault when redirecting to a DNS name...
+# So look it up I guess.
+$ip = inet_ntoa(inet_aton($name));
+
+# Listen without forever on $PORT waiting for at least some input 
+# before initiating connection. Each time the connection is terminated
+# wait for a new one.
+system("socat TCP-LISTEN:$PORT,fork TCP:$ip:$PORT &");
+
+# Tail the logs, so that if the container dies, the proxy dies too
+system("docker logs -f $name");
+
+sub stopper()
+{
+  print "Stopping container $name\n";
+  system("docker stop $name ; docker rm $name");
+}
